@@ -2,10 +2,7 @@ package code;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import util.ConfigUtils;
-import util.CsvUtils;
-import util.EsUtils;
-import util.GreenplumUtils;
+import util.*;
 import java.io.File;
 import java.nio.file.Files;
 import java.nio.file.Paths;
@@ -56,10 +53,11 @@ public class DataSync {
          *  1、检测索引对应数据结构
          *  2、检测gp对应数据表是否存在，如不存在则自动创建
          *  3、es读取数据写入csv文件
+         *      3.1、如果读取日期为月末，则需要扫描2个index，对应本月月末与下月月初
+         *      3.2、如果读取日期非月末，则需要扫描1个index，对应当前日期即可
          *  4、gp加载csv文件到对应数据表
          */
         for (Map.Entry<String, String> entry : indexTimeFieldMap.entrySet()) {
-
             String idx = entry.getKey().concat("_").concat(year).concat(".").concat(month).concat("_m");//上游数据源每月生成一个index，所以后缀格式为：tableName_年份.月份_m
             String timeField = entry.getValue();
             String tableName = entry.getKey();
@@ -76,8 +74,25 @@ public class DataSync {
                 GreenplumUtils.createTable(tableName, mapping);
             }
 
-            File csv = CsvUtils.writeEsDataToCsv(idx, date, mapping,timeField);
-            GreenplumUtils.copyCsvToGp(tableName, csv);
+            //从当前日期所属月份对应的index读取数据
+            File csvCurrentMonth = CsvUtils.writeEsDataToCsv(idx, date, mapping,timeField);//读取数据生成csv文件临时存储
+            GreenplumUtils.copyCsvToGp(tableName, csvCurrentMonth);//csv文件入库
+            CsvUtils.deleteCsvFile(csvCurrentMonth);//删除csv文件
+
+            //月末最后一天，抽取下月index中对应的本月月末数据
+            if(DateUtils.isMonthLastDay(date)){
+                String nextDay = DateUtils.getNextDay(date);
+                String nextDayOfYear = nextDay.substring(0,4); //获取明日对应年份
+                String nextDayOfMonth = nextDay.substring(5,7); //获取明日对应月份
+                idx = entry.getKey().concat("_").concat(nextDayOfYear).concat(".").concat(nextDayOfMonth).concat("_m");//上游数据源每月生成一个index，所以后缀格式为：tableName_年份.月份_m
+                log.info("月末最后一天：{}，从下月index获取数据，index：{}",date,idx);
+                File csvNextDay = CsvUtils.writeEsDataToCsv(idx, date, mapping,timeField);//读取数据生成csv文件临时存储
+                GreenplumUtils.copyCsvToGp(tableName, csvNextDay);//csv文件入库
+                CsvUtils.deleteCsvFile(csvNextDay);//删除csv文件
+            }
+            File csv = CsvUtils.writeEsDataToCsv(idx, date, mapping,timeField);//读取数据生成csv文件临时存储
+            GreenplumUtils.copyCsvToGp(tableName, csv);//csv文件入库
+            CsvUtils.deleteCsvFile(csv);//删除csv文件
         }
 
         EsUtils.close();
