@@ -90,9 +90,6 @@ public class DataSync {
                 GreenplumUtils.copyCsvToGp(tableName, csvNextDay);//csv文件入库
                 CsvUtils.deleteCsvFile(csvNextDay);//删除csv文件
             }
-            File csv = CsvUtils.writeEsDataToCsv(idx, date, mapping,timeField);//读取数据生成csv文件临时存储
-            GreenplumUtils.copyCsvToGp(tableName, csv);//csv文件入库
-            CsvUtils.deleteCsvFile(csv);//删除csv文件
         }
 
         EsUtils.close();
